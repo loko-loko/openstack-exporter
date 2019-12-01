@@ -52,16 +52,18 @@ var defaultCinderMetrics = []Metric{
 	{Name: "volumes", Fn: ListVolumes},
 	{Name: "snapshots", Fn: ListSnapshots},
 	{Name: "agent_state", Labels: []string{"hostname", "service", "adminState", "zone"}, Fn: ListCinderAgentState},
-	{Name: "volume_status", Labels: []string{"id", "name", "status", "bootable", "tenant_id", "size", "volume_type", "availability_zone"}, Fn: nil},
-	{Name: "volume_size", Labels: []string{"id", "name", "status", "bootable", "tenant_id", "volume_type", "availability_zone"}, Fn: nil},
+	{Name: "volume_status", Labels: []string{"id", "name", "status", "bootable", "tenant_id", "tenant_name", "size", "volume_type", "availability_zone"}, Fn: nil},
+	{Name: "volume_size", Labels: []string{"id", "name", "status", "bootable", "tenant_id", "tenant_name","volume_type", "availability_zone"}, Fn: nil},
 }
 
-func NewCinderExporter(client *gophercloud.ServiceClient, prefix string, disabledMetrics []string) (*CinderExporter, error) {
+func NewCinderExporter(client *gophercloud.ServiceClient, prefix string, keystoneClient *gophercloud.ServiceClient, addTenantName bool, disabledMetrics []string) (*CinderExporter, error) {
 	exporter := CinderExporter{
 		BaseOpenStackExporter{
 			Name:            "cinder",
 			Prefix:          prefix,
 			Client:          client,
+			KeystoneClient:  keystoneClient,
+			AddTenantName:   addTenantName,
 			DisabledMetrics: disabledMetrics,
 		},
 	}
@@ -80,6 +82,17 @@ func (exporter *CinderExporter) Describe(ch chan<- *prometheus.Desc) {
 
 func ListVolumes(exporter *BaseOpenStackExporter, ch chan<- prometheus.Metric) {
 	log.Infoln("Fetching volumes info")
+
+	var tenantMap map[string]string
+	var err error
+
+	if exporter.AddTenantName {
+		tenantMap, err = GetTenantMap(exporter.KeystoneClient)
+		if err != nil {
+			log.Errorln(err)
+			return
+		}
+	}
 
 	type VolumeWithExt struct {
 		volumes.Volume
@@ -109,10 +122,11 @@ func ListVolumes(exporter *BaseOpenStackExporter, ch chan<- prometheus.Metric) {
 	for _, volume := range allVolumes {
 		ch <- prometheus.MustNewConstMetric(exporter.Metrics["volume_status"].Metric,
 			prometheus.GaugeValue, float64(mapVolumeStatus(volume.Status)), volume.ID, volume.Name,
-			volume.Status, volume.Bootable, volume.TenantID, strconv.Itoa(volume.Size), volume.VolumeType, volume.AvailabilityZone)
+			volume.Status, volume.Bootable, volume.TenantID, tenantMap[volume.TenantID], strconv.Itoa(volume.Size), volume.VolumeType, volume.AvailabilityZone)
 		ch <- prometheus.MustNewConstMetric(exporter.Metrics["volume_size"].Metric,
 			prometheus.GaugeValue, float64(volume.Size), volume.ID, volume.Name,
-			volume.Status, volume.Bootable, volume.TenantID, volume.VolumeType, volume.AvailabilityZone)
+			volume.Status, volume.Bootable, volume.TenantID, tenantMap[volume.TenantID], 
+			volume.VolumeType, volume.AvailabilityZone)
 	}
 }
 

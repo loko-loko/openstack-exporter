@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/gophercloud/gophercloud"
 	"github.com/gophercloud/gophercloud/openstack"
+	"github.com/gophercloud/gophercloud/openstack/identity/v3/projects"
 	"github.com/gophercloud/utils/openstack/clientconfig"
 	"net/http"
 	"os"
@@ -166,4 +167,24 @@ func GetEndpointType(endpointType string) gophercloud.Availability {
 		return gophercloud.AvailabilityAdmin
 	}
 	return gophercloud.AvailabilityPublic
+}
+
+func GetTenantMap(client *gophercloud.ServiceClient) (map[string]string, error) {
+	allPagesProject, err := projects.List(client, projects.ListOpts{}).AllPages()
+	if err != nil {
+		return nil, err
+	}
+
+	allProjects, err := projects.ExtractProjects(allPagesProject)
+	if err != nil {
+		return nil, err
+	}
+
+	var tenantMap = make(map[string]string)
+
+	for _, tenant := range allProjects {
+		tenantMap[tenant.ID] = tenant.Name
+	}
+
+	return tenantMap, nil
 }

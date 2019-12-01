@@ -65,16 +65,18 @@ var defaultNovaMetrics = []Metric{
 	{Name: "memory_used_bytes", Labels: []string{"hostname", "availability_zone"}},
 	{Name: "local_storage_available_bytes", Labels: []string{"hostname", "availability_zone"}},
 	{Name: "local_storage_used_bytes", Labels: []string{"hostname", "availability_zone"}},
-	{Name: "server_status", Labels: []string{"id", "status", "name", "tenant_id", "user_id", "address_ipv4",
+	{Name: "server_status", Labels: []string{"id", "status", "name", "tenant_id", "tenant_name", "user_id", "address_ipv4",
 		"address_ipv6", "host_id", "uuid", "availability_zone", "flavor_id"}},
 }
 
-func NewNovaExporter(client *gophercloud.ServiceClient, prefix string, disabledMetrics []string) (*NovaExporter, error) {
+func NewNovaExporter(client *gophercloud.ServiceClient, prefix string, keystoneClient *gophercloud.ServiceClient, addTenantName bool, disabledMetrics []string) (*NovaExporter, error) {
 	exporter := NovaExporter{
 		BaseOpenStackExporter{
 			Name:            "nova",
 			Prefix:          prefix,
 			Client:          client,
+            KeystoneClient:  keystoneClient,
+			AddTenantName:   addTenantName,
 			DisabledMetrics: disabledMetrics,
 		},
 	}
@@ -255,6 +257,17 @@ func ListAllServers(exporter *BaseOpenStackExporter, ch chan<- prometheus.Metric
 
 	log.Infoln("Fetching list of servers for all tenants")
 
+	var tenantMap map[string]string
+	var err error
+
+	if exporter.AddTenantName {
+		tenantMap, err = GetTenantMap(exporter.KeystoneClient)
+		if err != nil {
+			log.Errorln(err)
+			return
+		}
+	}
+
 	type ServerWithExt struct {
 		servers.Server
 		availabilityzones.ServerAvailabilityZoneExt
@@ -280,7 +293,7 @@ func ListAllServers(exporter *BaseOpenStackExporter, ch chan<- prometheus.Metric
 	// Server status metrics
 	for _, server := range allServers {
 		ch <- prometheus.MustNewConstMetric(exporter.Metrics["server_status"].Metric,
-			prometheus.GaugeValue, float64(mapServerStatus(server.Status)), server.ID, server.Status, server.Name, server.TenantID,
+			prometheus.GaugeValue, float64(mapServerStatus(server.Status)), server.ID, server.Status, server.Name, server.TenantID, tenantMap[server.TenantID],
 			server.UserID, server.AccessIPv4, server.AccessIPv6, server.HostID, server.ID, server.AvailabilityZone, fmt.Sprintf("%v", server.Flavor["id"]))
 	}
 }

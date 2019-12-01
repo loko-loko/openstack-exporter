@@ -37,8 +37,8 @@ type OpenStackExporter interface {
 	RefreshClient() error
 }
 
-func EnableExporter(service, prefix, cloud string, disabledMetrics []string, endpointType string) (*OpenStackExporter, error) {
-	exporter, err := NewExporter(service, prefix, cloud, disabledMetrics, endpointType)
+func EnableExporter(service, prefix, cloud string, disabledMetrics []string, endpointType string, addTenantName bool) (*OpenStackExporter, error) {
+	exporter, err := NewExporter(service, prefix, cloud, disabledMetrics, endpointType, addTenantName)
 	if err != nil {
 		return nil, err
 	}
@@ -56,6 +56,8 @@ type BaseOpenStackExporter struct {
 	Prefix          string
 	Metrics         map[string]*PrometheusMetric
 	Client          *gophercloud.ServiceClient
+	KeystoneClient  *gophercloud.ServiceClient
+	AddTenantName   bool
 	DisabledMetrics []string
 }
 
@@ -131,10 +133,11 @@ func (exporter *BaseOpenStackExporter) AddMetric(name string, fn ListFunc, label
 	}
 }
 
-func NewExporter(name, prefix, cloud string, disabledMetrics []string, endpointType string) (OpenStackExporter, error) {
+func NewExporter(name, prefix, cloud string, disabledMetrics []string, endpointType string, addTenantName bool) (OpenStackExporter, error) {
 	var exporter OpenStackExporter
 	var err error
 	var transport *http.Transport
+	var keystoneClient *gophercloud.ServiceClient
 
 	opts := clientconfig.ClientOpts{Cloud: cloud}
 
@@ -154,6 +157,14 @@ func NewExporter(name, prefix, cloud string, disabledMetrics []string, endpointT
 		return nil, err
 	}
 
+	if addTenantName && (name == "compute" || name == "volume") {
+		keystoneClient, err = NewServiceClient("identity", &opts, transport, endpointType)
+		if err != nil {
+			log.Errorln(err)
+			return nil, err
+		}
+	}
+
 	switch name {
 	case "network":
 		{
@@ -164,7 +175,7 @@ func NewExporter(name, prefix, cloud string, disabledMetrics []string, endpointT
 		}
 	case "compute":
 		{
-			exporter, err = NewNovaExporter(client, prefix, disabledMetrics)
+			exporter, err = NewNovaExporter(client, prefix, keystoneClient, addTenantName, disabledMetrics)
 			if err != nil {
 				return nil, err
 			}
@@ -178,7 +189,7 @@ func NewExporter(name, prefix, cloud string, disabledMetrics []string, endpointT
 		}
 	case "volume":
 		{
-			exporter, err = NewCinderExporter(client, prefix, disabledMetrics)
+			exporter, err = NewCinderExporter(client, prefix, keystoneClient, addTenantName, disabledMetrics)
 			if err != nil {
 				return nil, err
 			}
